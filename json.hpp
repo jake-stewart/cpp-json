@@ -9,6 +9,7 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#include <cstring>
 
 namespace json {
 // CONSTEXPR UTILS {{{
