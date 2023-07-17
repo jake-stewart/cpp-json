@@ -5,7 +5,7 @@
 
 #define JSON_ENCODE_ASCII
 
-#include "../include/json.hpp"
+#include "json.hpp"
 
 json::Prettifier prettifier(4);
 
