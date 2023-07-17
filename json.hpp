@@ -629,6 +629,11 @@ std::string serializeNumber(const T &item) {
     return std::to_string(item);
 }
 
+inline std::string serializeChar(const char &item) {
+    unsigned char value = item;
+    return std::to_string(value);
+}
+
 template <typename T>
 std::string serializeClass(const T& item) {
     JsonObjectBuilder jsonObject;
@@ -688,6 +693,9 @@ std::string serialize(const T &item) {
     }
     else if constexpr (std::is_enum<T>().value) {
         return serializeEnum(item);
+    }
+    else if constexpr (std::is_same<T, char>().value) {
+        return serializeChar(item);
     }
     else if constexpr (std::is_arithmetic<T>().value) {
         return serializeNumber(item);
@@ -955,6 +963,12 @@ void deserializeNumber(T &item, Cursor &cursor) {
     }
 }
 
+inline void deserializeChar(char &item, Cursor &cursor) {
+    unsigned char value;
+    deserializeNumber<unsigned char>(value, cursor);
+    item = value;
+}
+
 template <typename T>
 void deserializeClass(T &item, Cursor &cursor) {
     constexpr auto props = properties<T>();
@@ -1021,6 +1035,9 @@ void deserialize(T &item, Cursor &cursor) {
     }
     else if constexpr (std::is_enum<T>().value) {
         deserializeEnum(item, cursor);
+    }
+    else if constexpr (std::is_same<T, char>().value) {
+        deserializeChar(item, cursor);
     }
     else if constexpr (std::is_arithmetic<T>().value) {
         deserializeNumber(item, cursor);
