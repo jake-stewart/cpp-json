@@ -9,8 +9,21 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#include <cstring>
 
 namespace json {
+// CONSTEXPR UTILS {{{
+template<typename Test, template<typename...> class Ref>
+struct is_specialization : std::false_type {};
+
+template<template<typename...> class Ref, typename... Args>
+struct is_specialization<Ref<Args...>, Ref>: std::true_type {};
+
+template <typename T, size_t n>
+constexpr size_t array_size(const T (&)[n]) {
+    return n;
+}
+// }}}
 // FOR EACH MACRO {{{
 #define PARENS ()
 
@@ -58,6 +71,16 @@ struct Property
         return std::tuple{FOR_EACH(REFLECT_PROPERTY, __VA_ARGS__)};            \
     }
 // }}}
+// JSON EXCEPTION {{{
+struct exception {
+    std::string description;
+    int idx;
+    exception(std::string description, int idx) {
+        this->description = description;
+        this->idx = idx;
+    }
+};
+// }}}
 // CURSOR {{{
 struct Cursor
 {
@@ -68,7 +91,9 @@ struct Cursor
 
     void expect(char c) {
         if (next() != c) {
-            throw std::exception();
+            std::string desc = std::string("expected '") + c + "'";
+            desc += std::string(" but got '") + peek(-1) + "'";
+            throw exception(desc, idx);
         }
     }
 
@@ -92,9 +117,35 @@ struct Cursor
         idx += i;
     }
 
-    void skipWhitespace() {
-        while (isspace(peek())) {
+    void skipWhitespaceAndComments() {
+        while (true) {
+            if (isspace(peek())) {
+                next();
+                continue;
+            }
+            if (peek() != '/') {
+                break;
+            }
             next();
+            if (peek() == '/') {
+                next();
+                while (peek() && peek() != '\n') {
+                    next();
+                }
+            }
+            else if (peek() == '*') {
+                next();
+                while (peek()) {
+                    if (peek() == '*' && peek(1) == '/') {
+                        next(2);
+                        break;
+                    }
+                    next();
+                }
+            }
+            else {
+                break;
+            }
         }
     }
 
@@ -246,17 +297,17 @@ inline std::string unescapeCodepoint(Cursor &cursor) {
     cursor.next(3);
     if (0xd800 <= cp && cp <= 0xdbff) {
         if (cursor.peek(1) != '\\' || cursor.peek(2) != 'u') {
-            throw std::exception();
+            throw exception("expected utf-8 surrogate pair", cursor.idx);
         }
         int cp2 = utf8::parseCodepoint(cursor.c_str() + 3);
         if (!(0xdc00 <= cp2 && cp2 <= 0xdfff)) {
-            throw std::exception();
+            throw exception("invalid utf-8 surrogate pair", cursor.idx);
         }
         cp = utf8::desurrogatePair(cp, cp2);
         cursor.next(6);
     }
     if (cp > 0x10FFFF) {
-        throw std::exception();
+        throw exception("invalid utf-8 codepoint", cursor.idx);
     }
     char buf[4];
     int size = utf8::codepointToBytes(cp, buf);
@@ -325,42 +376,36 @@ class JsonArrayParser
     Cursor &m_cursor;
     bool m_first = true;
 
+public:
+    JsonArrayParser(Cursor &cursor) : m_cursor(cursor) {}
+
     void start() {
-        m_cursor.skipWhitespace();
+        m_cursor.skipWhitespaceAndComments();
         m_cursor.expect('[');
     }
 
     void finish() {
-        m_cursor.skipWhitespace();
+        m_cursor.skipWhitespaceAndComments();
         m_cursor.expect(']');
     }
 
-public:
-    JsonArrayParser(Cursor &cursor) : m_cursor(cursor) {
-        start();
-    }
-
-    ~JsonArrayParser() {
-        finish();
-    }
-
     bool optionalNext() {
-        m_cursor.skipWhitespace();
+        m_cursor.skipWhitespaceAndComments();
         if (m_cursor.peek() == ']') {
             return false;
         }
-        m_cursor.skipWhitespace();
+        m_cursor.skipWhitespaceAndComments();
         if (!m_first) {
             m_cursor.expect(',');
         }
-        m_cursor.skipWhitespace();
+        m_cursor.skipWhitespaceAndComments();
         m_first = false;
         return true;
     }
 
     void next() {
         if (!optionalNext()) {
-            throw std::exception();
+            throw exception("not enough elements in array", m_cursor.idx);
         }
     }
 };
@@ -370,236 +415,52 @@ class JsonObjectParser
     Cursor &m_cursor;
     bool m_first = true;
 
+public:
+    JsonObjectParser(Cursor &cursor) : m_cursor(cursor) {}
+
     void start() {
-        m_cursor.skipWhitespace();
+        m_cursor.skipWhitespaceAndComments();
         m_cursor.expect('{');
     }
 
     void finish() {
-        m_cursor.skipWhitespace();
+        m_cursor.skipWhitespaceAndComments();
         m_cursor.expect('}');
     }
 
-public:
-    JsonObjectParser(Cursor &cursor) : m_cursor(cursor) {
-        start();
-    }
-
-    ~JsonObjectParser() {
-        finish();
-    }
-
     bool optionalNext() {
-        m_cursor.skipWhitespace();
+        m_cursor.skipWhitespaceAndComments();
         if (m_cursor.peek() == '}') {
             return false;
         }
-        m_cursor.skipWhitespace();
+        m_cursor.skipWhitespaceAndComments();
         if (!m_first) {
             m_cursor.expect(',');
         }
-        m_cursor.skipWhitespace();
+        m_cursor.skipWhitespaceAndComments();
         m_first = false;
         return true;
     }
 
     void next() {
         if (!optionalNext()) {
-            throw std::exception();
+            throw exception("not enough elements in object", m_cursor.idx);
         }
     }
 
     void value() {
-        m_cursor.skipWhitespace();
+        m_cursor.skipWhitespaceAndComments();
         m_cursor.expect(':');
-        m_cursor.skipWhitespace();
+        m_cursor.skipWhitespaceAndComments();
     }
 };
 // }}}
-// DEFINITION {{{
-
-// SERIALIZE/DESERIALIZE INTERFACE
+// SERIALIZE {{{
 template <typename T>
 std::string serialize(const T &item);
-template <typename T>
-void deserialize(T item, Cursor &cursor);
-
-// DESERIALIZE HELPERS
-template <typename T>
-void deserialize(T &item, const std::string &json);
-template <typename T>
-T deserialize(const std::string &json);
-
-// STRUCTS
-template <typename T> requires(std::is_class<T>())
-std::string serialize(const T &item);
-template <typename T> requires(std::is_class<T>())
-void deserialize(T &item, Cursor &cursor);
-
-// POINTERS
-template <typename T>
-std::string serialize(T *const &item);
-template <typename T>
-void deserialize(T *&item, Cursor &cursor);
-
-// UNIQUE POINTERS
-template <typename T>
-std::string serialize(const std::unique_ptr<T> &item);
-template <typename T>
-void deserialize(std::unique_ptr<T> &item, Cursor &cursor);
-
-// NUMBERS
-template <typename T> requires(std::is_arithmetic<T>())
-std::string serialize(const T &item);
-template <typename T> requires(std::is_arithmetic<T>())
-void deserialize(T &item, Cursor &cursor);
-
-// ENUMS
-template <typename T> requires(std::is_enum<T>())
-std::string serialize(const T &item);
-template <typename T> requires(std::is_enum<T>())
-void deserialize(T &item, Cursor &cursor);
-
-// OPTIONALS
-template <typename T>
-std::string serialize(const std::optional<T> &item);
-template <typename T>
-void deserialize(std::optional<T> &item, Cursor &cursor);
-
-// VECTORS
-template <typename T>
-std::string serialize(const std::vector<T> &item);
-template <typename T>
-void deserialize(std::vector<T> &item, Cursor &cursor);
-
-// BIT REFERENCE VECTORS
-// std::vector<bool> does some __bit_reference magic behind the scenes
-template <typename T>
-std::string serialize(const std::__bit_const_reference<T> &item);
-template <>
-inline void deserialize(std::__bit_reference<std::vector<bool>> item, Cursor &cursor);
-
-// STATIC ARRAYS
-template <typename T, size_t Y>
-std::string serialize(const T (&item)[Y]);
-template <typename T, size_t Y>
-void deserialize(T (&item)[Y], Cursor &cursor);
-
-// PAIRS
-template <typename T, typename Y>
-std::string serialize(const std::pair<T, Y> &item);
-template <typename T, typename Y>
-void deserialize(std::pair<T, Y> &item, Cursor &cursor);
-
-// TUPLES
-template <typename... T>
-std::string serialize(const std::tuple<T...> &item);
-template <typename... T>
-void deserialize(std::tuple<T...> &item, Cursor &cursor);
-
-// MAPS
-template <typename T, typename K>
-std::string serializeMap(const T &item);
-template <typename T, typename K>
-void deserializeMap(T &item, Cursor &cursor);
-
-template <typename K, typename V>
-std::string serialize(const std::map<K, V> &item);
-template <typename K, typename V>
-void deserialize(std::map<K, V> &item, Cursor &cursor);
-
-template <typename K, typename V>
-std::string serialize(const std::unordered_map<K, V> &item);
-template <typename K, typename V>
-void deserialize(std::unordered_map<K, V> &item, Cursor &cursor);
-
-// STRINGS
-template <typename T>
-static std::string serializeString(const T &item);
-template <typename T>
-void deserializeString(T &item, Cursor &cursor);
-
-template <>
-inline std::string serialize(const std::string &item);
-template <>
-inline void deserialize(std::string &item, Cursor &cursor);
-
-template <>
-inline std::string serialize(const char *const &item);
-template <>
-inline void deserialize(const char *&item, Cursor &cursor);
-
-template <>
-inline std::string serialize(char *const &item);
-template <>
-inline void deserialize(char *&item, Cursor &cursor);
-
-// BOOLS
-template <>
-inline std::string serialize(const bool &item);
-template <>
-inline void deserialize(bool &item, Cursor &cursor);
-
-// }}}
-// IMPLEMENTATION {{{
-
-// STRUCTS
-template <typename T> requires(std::is_class<T>())
-std::string serialize(const T &item) {
-    JsonObjectBuilder jsonObject;
-    constexpr auto props = properties<T>();
-    constexpr auto size = std::tuple_size<decltype(props)>::value;
-    for_sequence(std::make_index_sequence<size>{}, [&](auto i) {
-        constexpr auto property = std::get<i>(properties<T>());
-        jsonObject.quotedKey(property.key);
-        jsonObject.value(serialize(item.*(property.value)));
-    });
-    return jsonObject.build();
-}
-
-template <typename T> requires(std::is_class<T>())
-void deserialize(T &item, Cursor &cursor) {
-    constexpr auto props = properties<T>();
-    constexpr auto size = std::tuple_size<decltype(props)>::value;
-    JsonObjectParser objectParser(cursor);
-    while (objectParser.optionalNext()) {
-        std::string key;
-        deserialize(key, cursor);
-        objectParser.value();
-        for_sequence(std::make_index_sequence<size>{}, [&](auto i) {
-            constexpr auto property = std::get<i>(properties<T>());
-            if (strcmp(property.key, key.c_str()) == 0) {
-                deserialize(item.*(property.value), cursor);
-            }
-        });
-    }
-}
-
-// POINTERS
-template <typename T>
-std::string serialize(T *const &item) {
-    if (item == nullptr) {
-        return "null";
-    }
-    else {
-        return serialize(*item);
-    }
-}
 
 template <typename T>
-void deserialize(T *&item, Cursor &cursor) {
-    if (cursor.peekKeyword() == "null") {
-        cursor.next(4);
-        item = nullptr;
-        return;
-    }
-    item = new T();
-    deserialize(*item, cursor);
-}
-
-// UNIQUE POINTERS
-template <typename T>
-std::string serialize(const std::unique_ptr<T> &item) {
+std::string serializeUniquePointer(const std::unique_ptr<T> &item) {
     if (item) {
         return serialize(*item);
     }
@@ -609,79 +470,7 @@ std::string serialize(const std::unique_ptr<T> &item) {
 }
 
 template <typename T>
-void deserialize(std::unique_ptr<T> &item, Cursor &cursor) {
-    item = std::make_unique<T>();
-    deserialize(*item, cursor);
-}
-
-// NUMBERS
-template <typename T> requires(std::is_arithmetic<T>())
-std::string serialize(const T &item) {
-    return std::to_string(item);
-}
-
-template <typename T> requires(std::is_arithmetic<T>())
-void deserialize(T &item, Cursor &cursor) {
-    int length = 0;
-    if (cursor.peek(length) == '-') {
-        length++;
-    }
-    while (isdigit(cursor.peek(length))) {
-        length++;
-    }
-    if constexpr (std::is_floating_point<T>()) {
-        if (cursor.peek(length) == '.') {
-            length++;
-            while (isdigit(cursor.peek(length))) {
-                length++;
-            }
-            if (tolower(cursor.peek(length)) == 'e') {
-                length++;
-                if (cursor.peek(length) == '-') {
-                    length++;
-                }
-                while (isdigit(cursor.peek(length))) {
-                    length++;
-                }
-            }
-        }
-    }
-    std::string number = cursor.substr(length);
-    try {
-        if constexpr (std::is_floating_point<T>()) {
-            item = (T)std::stold(number);
-        }
-        else if constexpr (std::is_signed<T>()) {
-            item = (T)std::stoll(number);
-        }
-        else {
-            item = (T)std::stoull(number);
-        }
-    }
-    catch (const std::invalid_argument &) {
-        throw std::exception();
-    }
-    catch (const std::out_of_range &) {
-        throw std::exception();
-    }
-}
-
-// ENUMS
-template <typename T> requires(std::is_enum<T>())
-std::string serialize(const T &item) {
-    return std::to_string(item);
-}
-
-template <typename T> requires(std::is_enum<T>())
-void deserialize(T &item, Cursor &cursor) {
-    int value;
-    deserialize(value, cursor);
-    item = (T)value;
-}
-
-// OPTIONALS
-template <typename T>
-std::string serialize(const std::optional<T> &item) {
+std::string serializeOptional(const std::optional<T> &item) {
     if (item) {
         return serialize(*item);
     }
@@ -690,95 +479,16 @@ std::string serialize(const std::optional<T> &item) {
     }
 }
 
-template <typename T>
-void deserialize(std::optional<T> &item, Cursor &cursor) {
-    std::string keyword = cursor.peekKeyword();
-    if (keyword == "null") {
-        cursor.next(keyword.size());
-        item.reset();
-    }
-    else {
-        T elem;
-        deserialize(elem, cursor);
-        item = elem;
-    }
-}
-
-// VECTORS
-template <typename T>
-std::string serialize(const std::vector<T> &item) {
-    JsonArrayBuilder array;
-    for (const auto &elem : item) {
-        array.add(serialize(elem));
-    }
-    return array.build();
-}
-
-template <typename T>
-void deserialize(std::vector<T> &item, Cursor &cursor) {
-    item = std::vector<T>();
-    JsonArrayParser arrayParser(cursor);
-    while (arrayParser.optionalNext()) {
-        item.push_back(T());
-        deserialize(item.back(), cursor);
-    }
-}
-
-// BIT REFERENCE VECTORS
-template <typename T>
-std::string serialize(const std::__bit_const_reference<T> &item) {
-    return serialize((bool)item);
-}
-
-template <>
-inline void deserialize(
-    std::__bit_reference<std::vector<bool>> item, Cursor &cursor
-) {
-    bool value;
-    deserialize<bool>(value, cursor);
-    item = value;
-}
-
-// STATIC ARRAYS
-template <typename T, size_t Y>
-std::string serialize(const T (&item)[Y]) {
-    JsonArrayBuilder array;
-    for (int i = 0; i < Y; i++) {
-        array.add(serialize(item[i]));
-    }
-    return array.build();
-}
-
-template <typename T, size_t Y>
-void deserialize(T (&item)[Y], Cursor &cursor) {
-    JsonArrayParser arrayParser(cursor);
-    for (int i = 0; i < Y && arrayParser.optionalNext(); i++) {
-        deserialize(item[i], cursor);
-    }
-}
-
-// PAIRS
 template <typename T, typename Y>
-std::string serialize(const std::pair<T, Y> &item) {
+std::string serializePair(const std::pair<T, Y> &item) {
     JsonArrayBuilder array;
     array.add(serialize(item.first));
     array.add(serialize(item.second));
     return array.build();
 }
 
-template <typename T, typename Y>
-void deserialize(std::pair<T, Y> &item, Cursor &cursor) {
-    item = std::pair<T, Y>();
-    JsonArrayParser arrayParser(cursor);
-    arrayParser.next();
-    deserialize(item.first, cursor);
-    arrayParser.next();
-    deserialize(item.second, cursor);
-}
-
-// TUPLES
-template <typename... T>
-std::string serialize(const std::tuple<T...> &item) {
+template <typename ...T>
+std::string serializeTuple(const std::tuple<T...> &item) {
     JsonArrayBuilder array;
     constexpr auto size = std::tuple_size<std::tuple<T...>>::value;
     for_sequence(std::make_index_sequence<size>{}, [&](auto i) {
@@ -787,24 +497,31 @@ std::string serialize(const std::tuple<T...> &item) {
     return array.build();
 }
 
-template <typename... T>
-void deserialize(std::tuple<T...> &item, Cursor &cursor) {
-    item = std::tuple<T...>();
-    constexpr auto size = std::tuple_size<std::tuple<T...>>::value;
-    JsonArrayParser arrayParser(cursor);
-    for_sequence(std::make_index_sequence<size>{}, [&](auto i) {
-        arrayParser.next();
-        deserialize(std::get<i>(item), cursor);
-    });
+inline std::string serializeBoolVector(const std::vector<bool> &item) {
+    JsonArrayBuilder array;
+    for (const auto &elem : item) {
+        array.add(elem ? "true" : "false");
+    }
+    return array.build();
 }
 
-// MAPS
-template <typename T, typename K>
+template <typename T>
+std::string serializeVector(const std::vector<T> &item) {
+    JsonArrayBuilder array;
+    for (const auto &elem : item) {
+        array.add(serialize(elem));
+    }
+    return array.build();
+}
+
+template <typename T>
 std::string serializeMap(const T &item) {
+    using KeyType = typename std::decay<decltype(item.begin()->first)>::type;
     JsonObjectBuilder jsonObject;
     for (const auto &it : item) {
-        constexpr bool isString = std::is_same<K, std::string>() ||
-            std::is_same<K, char *>() || std::is_same<K, const char *>();
+        constexpr bool isString = std::is_same<KeyType, std::string>().value ||
+            std::is_same<KeyType, char *>().value ||
+            std::is_same<KeyType, const char *>().value;
         if constexpr (isString) {
             jsonObject.key(serialize(it.first));
         }
@@ -816,52 +533,11 @@ std::string serializeMap(const T &item) {
     return jsonObject.build();
 }
 
-template <typename T, typename K>
-void deserializeMap(T &item, Cursor &cursor) {
-    JsonObjectParser objectParser(cursor);
-    while (objectParser.optionalNext()) {
-        K key;
-        constexpr bool isString = std::is_same<K, std::string>() ||
-            std::is_same<K, char *>() || std::is_same<K, const char *>();
-        if constexpr (isString) {
-            deserialize(key, cursor);
-        }
-        else {
-            std::string stringKey;
-            deserialize(stringKey, cursor);
-            key = deserialize<K>(stringKey);
-        }
-        objectParser.value();
-        deserialize(item[key], cursor);
-    }
-}
-
-template <typename K, typename V>
-std::string serialize(const std::map<K, V> &item) {
-    return serializeMap<std::map<K, V>, K>(item);
-}
-
-template <typename K, typename V>
-void deserialize(std::map<K, V> &item, Cursor &cursor) {
-    deserializeMap<std::map<K, V>, K>(item, cursor);
-}
-
-template <typename K, typename V>
-std::string serialize(const std::unordered_map<K, V> &item) {
-    return serializeMap<std::unordered_map<K, V>, K>(item);
-}
-
-template <typename K, typename V>
-void deserialize(std::unordered_map<K, V> &item, Cursor &cursor) {
-    deserializeMap<std::unordered_map<K, V>, K>(item, cursor);
-}
-
-// STRINGS
 template <typename T>
-static std::string serializeString(const T &item) {
+std::string serializeString(const T &item) {
     const char *str;
     size_t len;
-    if constexpr (std::is_same<T, std::string>()) {
+    if constexpr (std::is_same<T, std::string>().value) {
         str = item.c_str();
         len = item.size();
     }
@@ -872,12 +548,17 @@ static std::string serializeString(const T &item) {
     std::string string;
     string += '"';
     for (int i = 0; i < len; i++) {
-        switch (str[i]) {
-            case -256 ... - 1: {
+        switch ((unsigned char)str[i]) {
+            case 128 ... 255: {
 #ifndef JSON_ENCODE_ASCII
                 string += str[i];
 #else
-                string += utf8::escapeCodepoint(str, &i);
+                try {
+                    string += utf8::escapeCodepoint(str, &i);
+                }
+                catch (const std::exception&) {
+                    throw exception("invalid utf-8 codepoint", 0);
+                }
 #endif
                 break;
             }
@@ -915,16 +596,228 @@ static std::string serializeString(const T &item) {
     return string + '"';
 }
 
+inline std::string serializeBool(const bool &item) {
+    return item ? "true" : "false";
+}
+
+template <typename T, size_t N>
+std::string serializeArray(const T(&item)[N]) {
+    JsonArrayBuilder array;
+    for (int i = 0; i < N; i++) {
+        array.add(serialize(item[i]));
+    }
+    return array.build();
+}
+
+template <typename T>
+std::string serializePointer(const T &item) {
+    if (item == nullptr) {
+        return "null";
+    }
+    else {
+        return serialize(*item);
+    }
+}
+
+template <typename T>
+std::string serializeEnum(const T &item) {
+    return std::to_string(item);
+}
+
+template <typename T>
+std::string serializeNumber(const T &item) {
+    return std::to_string(item);
+}
+
+inline std::string serializeChar(const char &item) {
+    unsigned char value = item;
+    return std::to_string(value);
+}
+
+template <typename T>
+std::string serializeClass(const T& item) {
+    JsonObjectBuilder jsonObject;
+    constexpr auto props = properties<T>();
+    constexpr auto size = std::tuple_size<decltype(props)>::value;
+    for_sequence(std::make_index_sequence<size>{}, [&](auto i) {
+        constexpr auto property = std::get<i>(properties<T>());
+        jsonObject.quotedKey(property.key);
+        jsonObject.value(serialize(item.*(property.value)));
+    });
+    return jsonObject.build();
+}
+
+template <typename T>
+std::string serialize(const T &item) {
+    if constexpr (is_specialization<T, std::unique_ptr>().value) {
+        return serializeUniquePointer(item);
+    }
+    else if constexpr (is_specialization<T, std::optional>().value) {
+        return serializeOptional(item);
+    }
+    else if constexpr (is_specialization<T, std::pair>().value) {
+        return serializePair(item);
+    }
+    else if constexpr (is_specialization<T, std::tuple>().value) {
+        return serializeTuple(item);
+    }
+    else if constexpr (std::is_same<T, std::vector<bool>>().value) {
+        return serializeBoolVector(item);
+    }
+    else if constexpr (is_specialization<T, std::vector>().value) {
+        return serializeVector(item);
+    }
+    else if constexpr (is_specialization<T, std::map>().value) {
+        return serializeMap(item);
+    }
+    else if constexpr (is_specialization<T, std::unordered_map>().value) {
+        return serializeMap(item);
+    }
+    else if constexpr (std::is_same<T, std::string>().value) {
+        return serializeString(item);
+    }
+    else if constexpr (std::is_same<T, char *>().value) {
+        return serializeString(item);
+    }
+    else if constexpr (std::is_same<T, const char *>().value) {
+        return serializeString(item);
+    }
+    else if constexpr (std::is_array<T>().value) {
+        return serializeArray(item);
+    }
+    else if constexpr (std::is_same<T, bool>().value) {
+        return serializeBool(item);
+    }
+    else if constexpr (std::is_pointer<T>().value) {
+        return serializePointer(item);
+    }
+    else if constexpr (std::is_enum<T>().value) {
+        return serializeEnum(item);
+    }
+    else if constexpr (std::is_same<T, char>().value) {
+        return serializeChar(item);
+    }
+    else if constexpr (std::is_arithmetic<T>().value) {
+        return serializeNumber(item);
+    }
+    else if constexpr (std::is_class<T>().value) {
+        return serializeClass(item);
+    }
+}
+// }}}
+// DESERIALIZE {{{
+template <typename T>
+void deserialize(T &item, Cursor &cursor);
+
+template <typename T>
+void deserialize(T &item, const std::string &json);
+
+template <typename T>
+T deserialize(const std::string &json);
+
+template <typename T>
+void deserializeUniquePointer(std::unique_ptr<T> &item, Cursor &cursor) {
+    item = std::make_unique<T>();
+    deserialize(*item, cursor);
+}
+
+template <typename T>
+void deserializeOptional(std::optional<T> &item, Cursor &cursor) {
+    std::string keyword = cursor.peekKeyword();
+    if (keyword == "null") {
+        cursor.next(keyword.size());
+        item.reset();
+    }
+    else {
+        T tmp;
+        deserialize(tmp, cursor);
+        item = tmp;
+    }
+}
+
+template <typename T, typename Y>
+void deserializePair(std::pair<T, Y> &item, Cursor &cursor) {
+    item = std::pair<T, Y>();
+    JsonArrayParser arrayParser(cursor);
+    arrayParser.start();
+    arrayParser.next();
+    deserialize(item.first, cursor);
+    arrayParser.next();
+    deserialize(item.second, cursor);
+    arrayParser.finish();
+}
+
+template <typename ...T>
+void deserializeTuple(std::tuple<T...> &item, Cursor &cursor) {
+    item = std::tuple<T...>();
+    constexpr auto size = std::tuple_size<std::tuple<T...>>::value;
+    JsonArrayParser arrayParser(cursor);
+    arrayParser.start();
+    for_sequence(std::make_index_sequence<size>{}, [&](auto i) {
+        arrayParser.next();
+        deserialize(std::get<i>(item), cursor);
+    });
+    arrayParser.finish();
+}
+
+inline void deserializeBoolVector(std::vector<bool> &item, Cursor &cursor) {
+    item = std::vector<bool>();
+    JsonArrayParser arrayParser(cursor);
+    arrayParser.start();
+    while (arrayParser.optionalNext()) {
+        bool result;
+        deserialize(result, cursor);
+        item.push_back(result);
+    }
+    arrayParser.finish();
+}
+
+template <typename T>
+void deserializeVector(std::vector<T> &item, Cursor &cursor) {
+    item = std::vector<T>();
+    JsonArrayParser arrayParser(cursor);
+    arrayParser.start();
+    while (arrayParser.optionalNext()) {
+        item.push_back(T());
+        deserialize(item.back(), cursor);
+    }
+    arrayParser.finish();
+}
+
+template <typename T>
+void deserializeMap(T &item, Cursor &cursor) {
+    using KeyType = typename std::decay<decltype(item.begin()->first)>::type;
+    JsonObjectParser objectParser(cursor);
+    objectParser.start();
+    while (objectParser.optionalNext()) {
+        KeyType key;
+        constexpr bool isString = std::is_same<KeyType, std::string>().value ||
+            std::is_same<KeyType, char *>().value ||
+            std::is_same<KeyType, const char *>().value;
+        if constexpr (isString) {
+            deserialize(key, cursor);
+        }
+        else {
+            std::string stringKey;
+            deserialize(stringKey, cursor);
+            deserialize<KeyType>(key, stringKey);
+        }
+        objectParser.value();
+        deserialize(item[key], cursor);
+    }
+    objectParser.finish();
+}
+
 template <typename T>
 void deserializeString(T &item, Cursor &cursor) {
-    if constexpr (std::is_pointer<T>()) {
+    if constexpr (std::is_pointer<T>().value) {
         std::string keyword = cursor.getKeyword();
         if (keyword == "null") {
             item = nullptr;
             return;
         }
         else if (keyword.size()) {
-            throw std::exception();
+            throw exception("invalid keyword '" + keyword + "'", cursor.idx);
         }
     }
     cursor.expect('"');
@@ -953,11 +846,16 @@ void deserializeString(T &item, Cursor &cursor) {
                     string += '\b';
                     break;
                 case 'u': {
-                    string += utf8::unescapeCodepoint(cursor);
+                    try {
+                        string += utf8::unescapeCodepoint(cursor);
+                    }
+                    catch (const std::exception&) {
+                        throw exception("invalid utf-8 codepoint", cursor.idx);
+                    }
                     break;
                 }
                 default:
-                    throw std::exception();
+                    throw exception("invalid escape character", cursor.idx);
             }
         }
         else {
@@ -966,7 +864,8 @@ void deserializeString(T &item, Cursor &cursor) {
         cursor.next();
     }
     cursor.expect('"');
-    if constexpr (std::is_pointer<T>()) {
+    if constexpr (std::is_pointer<T>().value) {
+        string += '\0';
         item = new char[string.size()];
         memcpy((void *)item, string.c_str(), string.size());
     }
@@ -975,50 +874,7 @@ void deserializeString(T &item, Cursor &cursor) {
     }
 }
 
-template <>
-inline std::string serialize(const std::string &item) {
-    return serializeString(item);
-}
-
-template <>
-inline std::string serialize(const char *const &item) {
-    if (item == nullptr) {
-        return "null";
-    }
-    return serializeString(item);
-}
-
-template <>
-inline std::string serialize(char *const &item) {
-    if (item == nullptr) {
-        return "null";
-    }
-    return serializeString(item);
-}
-
-template <>
-inline void deserialize(std::string &item, Cursor &cursor) {
-    deserializeString(item, cursor);
-}
-
-template <>
-inline void deserialize(const char *&item, Cursor &cursor) {
-    deserializeString(item, cursor);
-}
-
-template <>
-inline void deserialize(char *&item, Cursor &cursor) {
-    deserializeString(item, cursor);
-}
-
-// BOOLS
-template <>
-inline std::string serialize(const bool &item) {
-    return item ? "true" : "false";
-}
-
-template <>
-inline void deserialize(bool &item, Cursor &cursor) {
+inline void deserializeBool(bool &item, Cursor &cursor) {
     std::string keyword = cursor.getKeyword();
     if (keyword == "true") {
         item = true;
@@ -1027,7 +883,166 @@ inline void deserialize(bool &item, Cursor &cursor) {
         item = false;
     }
     else {
-        throw std::exception();
+        throw exception("invalid keyword '" + keyword + "'", cursor.idx);
+    }
+}
+
+template <typename T, size_t N>
+void deserializeArray(T(&item)[N], Cursor &cursor) {
+    JsonArrayParser arrayParser(cursor);
+    arrayParser.start();
+    for (int i = 0; i < N && arrayParser.optionalNext(); i++) {
+        deserialize(item[i], cursor);
+    }
+    arrayParser.finish();
+}
+
+template <typename T>
+void deserializePointer(T &item, Cursor &cursor) {
+    using Type = typename std::remove_pointer<T>::type;
+    if (cursor.peekKeyword() == "null") {
+        cursor.next(4);
+        item = nullptr;
+        return;
+    }
+    item = new Type();
+    deserialize(*item, cursor);
+}
+
+template <typename T>
+void deserializeEnum(T &item, Cursor &cursor) {
+    int value;
+    deserialize(value, cursor);
+    item = (T)value;
+}
+
+template <typename T>
+void deserializeNumber(T &item, Cursor &cursor) {
+    int length = 0;
+    if (cursor.peek(length) == '-') {
+        length++;
+    }
+    while (isdigit(cursor.peek(length))) {
+        length++;
+    }
+    if constexpr (std::is_floating_point<T>().value) {
+        if (cursor.peek(length) == '.') {
+            length++;
+            while (isdigit(cursor.peek(length))) {
+                length++;
+            }
+            if (tolower(cursor.peek(length)) == 'e') {
+                length++;
+                if (cursor.peek(length) == '-') {
+                    length++;
+                }
+                while (isdigit(cursor.peek(length))) {
+                    length++;
+                }
+            }
+        }
+    }
+    std::string number = cursor.substr(length);
+    try {
+        if constexpr (std::is_floating_point<T>().value) {
+            item = (T)std::stold(number);
+        }
+        else if constexpr (std::is_signed<T>().value) {
+            item = (T)std::stoll(number);
+        }
+        else {
+            item = (T)std::stoull(number);
+        }
+    }
+    catch (const std::invalid_argument &) {
+        throw exception("invalid number", cursor.idx);
+    }
+    catch (const std::out_of_range &) {
+        throw exception("invalid number", cursor.idx);
+    }
+}
+
+inline void deserializeChar(char &item, Cursor &cursor) {
+    unsigned char value;
+    deserializeNumber<unsigned char>(value, cursor);
+    item = value;
+}
+
+template <typename T>
+void deserializeClass(T &item, Cursor &cursor) {
+    constexpr auto props = properties<T>();
+    constexpr auto size = std::tuple_size<decltype(props)>::value;
+    JsonObjectParser objectParser(cursor);
+    objectParser.start();
+    while (objectParser.optionalNext()) {
+        std::string key;
+        deserialize(key, cursor);
+        objectParser.value();
+        for_sequence(std::make_index_sequence<size>{}, [&](auto i) {
+            constexpr auto property = std::get<i>(properties<T>());
+            if (strcmp(property.key, key.c_str()) == 0) {
+                deserialize(item.*(property.value), cursor);
+            }
+        });
+    }
+    objectParser.finish();
+}
+
+template <typename T>
+void deserialize(T &item, Cursor &cursor) {
+    if constexpr (is_specialization<T, std::unique_ptr>().value) {
+        deserializeUniquePointer(item, cursor);
+    }
+    else if constexpr (is_specialization<T, std::optional>().value) {
+        deserializeOptional(item, cursor);
+    }
+    else if constexpr (is_specialization<T, std::pair>().value) {
+        deserializePair(item, cursor);
+    }
+    else if constexpr (is_specialization<T, std::tuple>().value) {
+        deserializeTuple(item, cursor);
+    }
+    else if constexpr (std::is_same<T, std::vector<bool>>().value) {
+        deserializeBoolVector(item, cursor);
+    }
+    else if constexpr (is_specialization<T, std::vector>().value) {
+        deserializeVector(item, cursor);
+    }
+    else if constexpr (is_specialization<T, std::map>().value) {
+        deserializeMap(item, cursor);
+    }
+    else if constexpr (is_specialization<T, std::unordered_map>().value) {
+        deserializeMap(item, cursor);
+    }
+    else if constexpr (std::is_same<T, std::string>().value) {
+        deserializeString(item, cursor);
+    }
+    else if constexpr (std::is_same<T, char *>().value) {
+        deserializeString(item, cursor);
+    }
+    else if constexpr (std::is_same<T, const char *>().value) {
+        deserializeString(item, cursor);
+    }
+    else if constexpr (std::is_same<T, bool>().value) {
+        deserializeBool(item, cursor);
+    }
+    else if constexpr (std::is_array<T>().value) {
+        deserializeArray(item, cursor);
+    }
+    else if constexpr (std::is_pointer<T>().value) {
+        deserializePointer(item, cursor);
+    }
+    else if constexpr (std::is_enum<T>().value) {
+        deserializeEnum(item, cursor);
+    }
+    else if constexpr (std::is_same<T, char>().value) {
+        deserializeChar(item, cursor);
+    }
+    else if constexpr (std::is_arithmetic<T>().value) {
+        deserializeNumber(item, cursor);
+    }
+    else if constexpr (std::is_class<T>().value) {
+        deserializeClass(item, cursor);
     }
 }
 // }}}
@@ -1036,9 +1051,9 @@ template <typename T>
 void deserialize(T &item, const std::string &json) {
     Cursor cursor(json);
     deserialize(item, cursor);
-    cursor.skipWhitespace();
+    cursor.skipWhitespaceAndComments();
     if (cursor.peek()) {
-        throw std::exception();
+        throw exception("expected EOF", cursor.idx);
     }
 }
 
