@@ -704,10 +704,8 @@ std::string serialize(const T &item) {
         return serializeClass(item);
     }
 }
-
 // }}}
 // DESERIALIZE {{{
-
 template <typename T>
 void deserialize(T &item, Cursor &cursor);
 
@@ -867,6 +865,7 @@ void deserializeString(T &item, Cursor &cursor) {
     }
     cursor.expect('"');
     if constexpr (std::is_pointer<T>().value) {
+        string += '\0';
         item = new char[string.size()];
         memcpy((void *)item, string.c_str(), string.size());
     }
@@ -1046,7 +1045,6 @@ void deserialize(T &item, Cursor &cursor) {
         deserializeClass(item, cursor);
     }
 }
-
 // }}}
 // DESERIALIZATION HELPERS IMPLEMENTATION {{{
 template <typename T>
