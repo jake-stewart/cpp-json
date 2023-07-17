@@ -548,8 +548,8 @@ std::string serializeString(const T &item) {
     std::string string;
     string += '"';
     for (int i = 0; i < len; i++) {
-        switch (str[i]) {
-            case -256 ... - 1: {
+        switch ((unsigned char)str[i]) {
+            case 128 ... 255: {
 #ifndef JSON_ENCODE_ASCII
                 string += str[i];
 #else
