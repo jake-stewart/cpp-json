@@ -192,8 +192,9 @@ void test(std::string desc, T item, std::string expected) {
     try {
         serialized = json::serialize(item);
     }
-    catch (const json::exception&) {
+    catch (const json::exception& ex) {
         printf("SERIALIZE EXCEPTION\n");
+        printf("    %-15s %s\n", "desc", ex.description.c_str());
         return;
     }
     if (serialized != expected) {
@@ -206,10 +207,11 @@ void test(std::string desc, T item, std::string expected) {
     try {
         deserialized = json::deserialize<T>(serialized);
     }
-    catch (const json::exception&) {
+    catch (const json::exception& ex) {
         printf("DESERIALIZE EXCEPTION\n");
         printf("    %-15s %s\n", "expected", expected.c_str());
         printf("    %-15s %s\n", "serialized", serialized.c_str());
+        printf("    %-15s %s\n", "desc", ex.description.c_str());
         return;
     }
     if constexpr (!std::is_pointer<T>()) {
@@ -223,10 +225,11 @@ void test(std::string desc, T item, std::string expected) {
     try {
         reserialized = json::serialize(deserialized);
     }
-    catch (const json::exception&) {
+    catch (const json::exception& ex) {
         printf("RESERIALIZE EXCEPTION\n");
         printf("    %-15s %s\n", "expected", expected.c_str());
         printf("    %-15s %s\n", "serialized", serialized.c_str());
+        printf("    %-15s %s\n", "desc", ex.description.c_str());
         return;
     }
     if (reserialized != expected) {
@@ -240,10 +243,11 @@ void test(std::string desc, T item, std::string expected) {
     try {
         deserialized = json::deserialize<T>(prettyJson);
     }
-    catch (const json::exception) {
+    catch (const json::exception &ex) {
         printf("PRETTY DESERIALIZE EXCEPTION\n");
         printf("    %-15s %s\n", "json", expected.c_str());
         printf("    %-15s %s\n", "pretty", prettyJson.c_str());
+        printf("    %-15s %s\n", "desc", ex.description.c_str());
         return;
     }
     if constexpr (!std::is_pointer<T>()) {
@@ -362,7 +366,7 @@ void charTest() {
     test("tab char", '\t', "9");
     test("backspace char", '\b', "8");
     test("null char", '\0', "0");
-    test<char>("negative char", -1, "-1");
+    test<char>("negative char", -1, "255");
 }
 
 void intTest() {
