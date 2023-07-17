@@ -1,15 +1,20 @@
 #pragma once
 
+#include <cstring>
+#include <deque>
+#include <list>
 #include <map>
 #include <memory>
 #include <optional>
+#include <queue>
+#include <set>
 #include <string>
 #include <tuple>
 #include <type_traits>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
-#include <cstring>
 
 namespace json {
 // CONSTEXPR UTILS {{{
@@ -506,7 +511,28 @@ inline std::string serializeBoolVector(const std::vector<bool> &item) {
 }
 
 template <typename T>
-std::string serializeVector(const std::vector<T> &item) {
+std::string serializeVector(const T &item) {
+    JsonArrayBuilder array;
+    for (const auto &elem : item) {
+        array.add(serialize(elem));
+    }
+    return array.build();
+}
+
+template <typename T>
+std::string serializeQueue(const std::queue<T> &item) {
+    JsonArrayBuilder array;
+    std::queue<T> copy = item;
+    while (copy.size()) {
+        array.add(serialize(copy.front()));
+        copy.pop();
+    }
+    return array.build();
+}
+
+template <typename T>
+std::string serializeSet(const T &item) {
+    std::deque<int> x;
     JsonArrayBuilder array;
     for (const auto &elem : item) {
         array.add(serialize(elem));
@@ -667,6 +693,21 @@ std::string serialize(const T &item) {
     else if constexpr (is_specialization<T, std::vector>().value) {
         return serializeVector(item);
     }
+    else if constexpr (is_specialization<T, std::list>().value) {
+        return serializeVector(item);
+    }
+    else if constexpr (is_specialization<T, std::deque>().value) {
+        return serializeVector(item);
+    }
+    else if constexpr (is_specialization<T, std::queue>().value) {
+        return serializeQueue(item);
+    }
+    else if constexpr (is_specialization<T, std::set>().value) {
+        return serializeSet(item);
+    }
+    else if constexpr (is_specialization<T, std::unordered_set>().value) {
+        return serializeSet(item);
+    }
     else if constexpr (is_specialization<T, std::map>().value) {
         return serializeMap(item);
     }
@@ -773,13 +814,41 @@ inline void deserializeBoolVector(std::vector<bool> &item, Cursor &cursor) {
 }
 
 template <typename T>
-void deserializeVector(std::vector<T> &item, Cursor &cursor) {
-    item = std::vector<T>();
+void deserializeVector(T &item, Cursor &cursor) {
+    using Type = typename std::decay<decltype(*item.begin())>::type;
+    item = T();
     JsonArrayParser arrayParser(cursor);
     arrayParser.start();
     while (arrayParser.optionalNext()) {
-        item.push_back(T());
+        item.push_back(Type());
         deserialize(item.back(), cursor);
+    }
+    arrayParser.finish();
+}
+
+template <typename T>
+void deserializeQueue(std::queue<T> &item, Cursor &cursor) {
+    item = std::queue<T>();
+    JsonArrayParser arrayParser(cursor);
+    arrayParser.start();
+    while (arrayParser.optionalNext()) {
+        T elem;
+        deserialize(elem, cursor);
+        item.push(elem);
+    }
+    arrayParser.finish();
+}
+
+template <typename T>
+void deserializeSet(T &item, Cursor &cursor) {
+    using Type = typename std::decay<decltype(*item.begin())>::type;
+    item = T();
+    JsonArrayParser arrayParser(cursor);
+    arrayParser.start();
+    while (arrayParser.optionalNext()) {
+        Type elem;
+        deserialize(elem, cursor);
+        item.insert(elem);
     }
     arrayParser.finish();
 }
@@ -1007,6 +1076,24 @@ void deserialize(T &item, Cursor &cursor) {
     }
     else if constexpr (is_specialization<T, std::vector>().value) {
         deserializeVector(item, cursor);
+    }
+    else if constexpr (is_specialization<T, std::list>().value) {
+        deserializeVector(item, cursor);
+    }
+    else if constexpr (is_specialization<T, std::deque>().value) {
+        deserializeVector(item, cursor);
+    }
+    else if constexpr (is_specialization<T, std::queue>().value) {
+        deserializeQueue(item, cursor);
+    }
+    else if constexpr (is_specialization<T, std::set>().value) {
+        deserializeSet(item, cursor);
+    }
+    else if constexpr (is_specialization<T, std::unordered_set>().value) {
+        deserializeSet(item, cursor);
+    }
+    else if constexpr (is_specialization<T, std::unordered_set>().value) {
+        deserializeSet(item, cursor);
     }
     else if constexpr (is_specialization<T, std::map>().value) {
         deserializeMap(item, cursor);
