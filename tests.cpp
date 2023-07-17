@@ -402,10 +402,103 @@ void vectorTest() {
         "foo", "bar", "baz"}, "[\"foo\",\"bar\",\"baz\"]");
     test("bool vector", std::vector<bool> {
         true, false, true}, "[true,false,true]");
-    // test("vector*", new std::vector<bool> {
-    //     true, false, true}, "[true,false,true]");
+    test("vector*", new std::vector<bool> {
+        true, false, true}, "[true,false,true]");
     test("vector*", new std::vector<int> {
         1, 2, 3}, "[1,2,3]");
+}
+
+void listTest() {
+    test("basic list", std::list<int> {
+        {1, 2, 3, 4, 5, 6, 7, 8, 9}
+    }, "[1,2,3,4,5,6,7,8,9]");
+    test("empty list", std::list<int> {}, "[]");
+    test("2d list", std::list<std::list<int>> {
+        {1, 2, 3}, {4, 5, 6}, {7, 8, 9}
+    }, "[[1,2,3],[4,5,6],[7,8,9]]");
+    test("string list", std::list<std::string> {
+        "foo", "bar", "baz"}, "[\"foo\",\"bar\",\"baz\"]");
+    test("bool list", std::list<bool> {
+        true, false, true}, "[true,false,true]");
+    test("list*", new std::list<bool> {
+        true, false, true}, "[true,false,true]");
+    test("list*", new std::list<int> {
+        1, 2, 3}, "[1,2,3]");
+}
+
+void setTest() {
+    test("basic set", std::set<int> {
+        {1, 2, 3, 4, 5, 6, 7, 8, 9}
+    }, "[1,2,3,4,5,6,7,8,9]");
+    test("empty set", std::set<int> {}, "[]");
+    test("2d set", std::set<std::set<int>> {
+        {1, 2, 3}, {4, 5, 6}, {7, 8, 9}
+    }, "[[1,2,3],[4,5,6],[7,8,9]]");
+    test("string set", std::set<std::string> {
+        "bar", "baz", "foo"}, "[\"bar\",\"baz\",\"foo\"]");
+    test("bool set", std::set<bool> {
+        true, false}, "[false,true]");
+    test("set*", new std::set<bool> {
+        true, false}, "[false,true]");
+    test("set*", new std::set<int> {
+        1, 2, 3}, "[1,2,3]");
+}
+
+void dequeTest() {
+    test("basic deque", std::deque<int> {
+        {1, 2, 3, 4, 5, 6, 7, 8, 9}
+    }, "[1,2,3,4,5,6,7,8,9]");
+    test("empty deque", std::deque<int> {}, "[]");
+    test("2d deque", std::deque<std::deque<int>> {
+        {1, 2, 3}, {4, 5, 6}, {7, 8, 9}
+    }, "[[1,2,3],[4,5,6],[7,8,9]]");
+    test("string deque", std::deque<std::string> {
+        "bar", "baz", "foo"}, "[\"bar\",\"baz\",\"foo\"]");
+    test("bool deque", std::deque<bool> {
+        true, false}, "[true,false]");
+    test("deque*", new std::deque<bool> {
+        true, false}, "[true,false]");
+    test("deque*", new std::deque<int> {
+        1, 2, 3}, "[1,2,3]");
+}
+
+void queueTest() {
+    std::queue<int> intQueue;
+    for (int i = 1; i < 10; i++) {
+        intQueue.push(i);
+    }
+    test("basic queue", intQueue, "[1,2,3,4,5,6,7,8,9]");
+    test("empty queue", std::queue<int>(), "[]");
+    std::queue<std::queue<int>> queue2d;
+    std::queue<int> subQueue;
+    for (int i = 1; i < 10; i++) {
+        subQueue.push(i);
+        if (i % 3 == 0) {
+            queue2d.push(subQueue);
+            subQueue = std::queue<int>();
+        }
+    }
+    test("2d queue", queue2d, "[[1,2,3],[4,5,6],[7,8,9]]");
+    std::queue<std::string> stringQueue;
+    stringQueue.push("foo");
+    stringQueue.push("bar");
+    stringQueue.push("baz");
+    test("string queue", stringQueue, "[\"foo\",\"bar\",\"baz\"]");
+    std::queue<bool> boolQueue;
+    boolQueue.push(true);
+    boolQueue.push(false);
+    boolQueue.push(true);
+    test("bool queue", boolQueue, "[true,false,true]");
+    std::queue<bool> *boolQueuePtr = new std::queue<bool>();
+    boolQueuePtr->push(true);
+    boolQueuePtr->push(false);
+    boolQueuePtr->push(true);
+    test("queue*", boolQueuePtr, "[true,false,true]");
+    std::queue<int> *intQueuePtr = new std::queue<int>();
+    for (int i = 1; i < 10; i++) {
+        intQueuePtr->push(i);
+    }
+    test("queue*", intQueuePtr, "[1,2,3,4,5,6,7,8,9]");
 }
 
 void mapTest() {
@@ -681,6 +774,10 @@ int main() {
         intTest();
         floatTest();
         vectorTest();
+        listTest();
+        setTest();
+        dequeTest();
+        queueTest();
         arrayTest();
         mapTest();
         structTest();
