@@ -1,18 +1,25 @@
 # cpp-json
-reflection in c++ for json de/serialization implemented as a single header library.
+reflection in c++ for compile-time reflection and json de/serialization implemented as a single header library.
+requires **c++20**.
+
+```cpp
+std::string serializedJson = json::serialize(myStruct);
+MyStruct deserialized = json::deserialize<MyStruct>(serializedJson);
+```
 
 ### public domain
 do whatever you want with this header file. use it, modify it, sell it. you do not need to credit me in any way.
 
 ### supported datatypes:
 - strings: `std::string`, `const char *` and `char *`
-- arrays: `std::vector` and `T[]`
+- arrays: `std::vector`, and `T[]`
 - maps: `std::map` and `std::unordered_map`
 - pointers: `T*`, `std::unique_ptr`
 - all arithmetic types (`int`, `unsigned long long`, `double`, `char`, etc)
-- various STL types: `std::tuple`, `std::pair` and `std::optional`
+- various STL types: `std::tuple`, `std::pair`, `std::optional`, `std::queue`, `std::deque`, `std::list`, `std::set`, `std::unordered_set`
 - enums
 - classes and structs via `REFLECT`
+- can be extended via template specializations.
 
 #### freeing pointers
 if you are smart and use `std::vector`, `std::unique_ptr`, and `std::string`, then you don't need to worry about memory management. you can skip this section.
@@ -20,6 +27,10 @@ if you are smart and use `std::vector`, `std::unique_ptr`, and `std::string`, th
 pointers are not treated as arrays. they are expected to reference a single value.
 when populating a pointer with `json::deserialize()`, the data is created using `new` and so should be freed with `delete`.
 `const char *` and `char *` are treated differently. they are expected to point to strings. they are created using `new []` and so should be deleted with `delete []`.
+
+#### exceptions
+if any problems occur during serialization or deserialization, a `json::exception` is thrown.
+the `json::exception` is a struct containing a short description in `std::string desc` and the json index where it was located in `int idx`.
 
 # example usage with serializing/deserializing structs
 ```c++
