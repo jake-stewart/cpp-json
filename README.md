@@ -1,5 +1,5 @@
 # cpp-json
-reflection in c++ for compile-time reflection and json de/serialization implemented as a single header library.
+reflection in c++ for compile-time json de/serialization implemented as a single header library.
 requires **c++20**.
 
 ```cpp
