@@ -1,6 +1,6 @@
 # cpp-json
 reflection in c++ for compile-time json de/serialization implemented as a single header library.
-requires **c++20**.
+requires **c++20**. Works with `g++` on macos and linux. Other operating systems & compilers are untested and may not work.
 
 ```cpp
 std::string serializedJson = json::serialize(myStruct);
